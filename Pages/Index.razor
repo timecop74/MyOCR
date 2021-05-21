@@ -2,6 +2,7 @@
 @using System.Drawing
 @using MyOCR.Data
 @using System.IO;
+@using System.Text
 @inject IJSRuntime JS
 
 @inject OCRService MyOcr1
@@ -13,151 +14,171 @@
         background-repeat: no-repeat;
     }
 </style>
-
-
-<base href="~/" />
-
-<h1>OCR</h1>
-
-<p>
-    Please select file to load
-    <InputFile OnChange="@LoadFiles" />
-</p>
-<div class="spinner-border" style="@spin" role="status">
-    <span class="sr-only">Loading...</span>
+<div class="container">
+    <div class="row justify-content-center">
+        <div>
+            Please select file to load
+            <InputFile OnChange="@LoadFiles" />
+        </div>
+    </div>
+    <div class="row justify-content-center">
+        <div>
+            <input type="button" @onclick="addreg" value="Add region" />
+            <input type="button" @onclick="delreg" value="Delete region">
+            <input type="button" @onclick="getareas" value="Recognize">
+        </div>
+    </div>
+    <div class="row justify-content-center">
+        <div>
+            <div class="spinner-border" style="@spin" role="status">
+                <span class="sr-only">Loading...</span>
+            </div>
+            <canvas id="canvas" width="180" height="170" style="@canv" @onmousedown="OnMouseDown"  @onmouseup="OnMouseUp" @onmousemove="OnMouseMove">
+                <img src="@fname" id="source" />
+            </canvas>
+        </div>
+    </div>
+    <div class="row justify-content-center">
+        <div>
+            <textarea rows="10" cols="120">@str</textarea>
+        </div>
+    </div>
 </div>
-<canvas id="canvas" width="800" height="700" style="@canv" @onclick="OnMouseDown" @onmousemove="OnMouseMove">
-    <img src="@fname" id="source" />
-</canvas>
-<p>
-    <label><input type="checkbox" checked="@regim" @onclick="RadioCh" />Перемещение или растягивание</label>
-    <input type="button" @onclick="addreg" value="Добавить регион" />
-    <input type="button" @onclick="delreg" value="Удалить регион">
-    <input type="button" @onclick="getareas" value="Получить список регионов">
-</p>
+        @code{
+            private string fname = "";
+            int maxY = 700;
+            int maxX = 700;
+            int OldX = 0;
+            int OldY = 0;
+            List<OCRData> areas = new List<OCRData>();
+            List<Rectangle> outareas = new List<Rectangle>();
+            List<string> txt = new List<string>();
+            bool regim = false;
+            string spin = "display:none;";
+            string canv = "display:none;";
+            StringBuilder str = new StringBuilder();
+            private bool RegimFlag = false;
+            private int MaxX = 0;
+            private int MaxY = 0;
 
-@code{
-    private string fname = "";
-    int maxY = 700;
-    int maxX = 700;
-    int OldX = 0;
-    int OldY = 0;
-    List<OCRData> areas = new List<OCRData>();
-    List<Rectangle> outareas = new List<Rectangle>();
-    bool regim = false;
-    string spin = "display:none;";
-    string canv = "display:none;";
-
-    public void getareas()
-    {
-        outareas.Clear();
-        foreach(OCRData dt in areas)
-        {
-            Rectangle rec = new Rectangle() { X = dt.X, Y = dt.Y, Width = dt.Width, Height = dt.Height };
-            outareas.Add(rec);
-        }
-
-    }
-
-    public void RadioCh()
-    {
-        regim = !regim;
-    }
-
-    public void delreg()
-    {
-        var r = from t in areas where t.State > 0 select t;
-        if(r.Count()>0)areas.Remove(r.First());
-        PaintPrimitives();
-    }
-
-    public void addreg()
-    {
-        Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = 100, Height = 100 };
-        areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
-        PaintPrimitives();
-    }
-
-    async Task OnMouseMove(MouseEventArgs e)
-    {
-        var r = from t in areas where t.State >0 select t;
-        if (r.Count() == 1)
-        {
-            foreach (OCRData dt in areas)
+            [JSInvokable]
+            public void OnKeyPress(string e)
             {
-                object[] ob = new object[5];
-                ob[0] = dt.X;
-                ob[1] = dt.Y;
-                ob[2] = dt.Width;
-                ob[3] = dt.Height;
-                if (dt.State == 0) ob[4] = "green";
-                else
-                {
-                    if (dt.State == 1)
-                    {
-                        ob[4] = "red";
-                        ob[0] = e.OffsetX;
-                        ob[1] = e.OffsetY;
-                        dt.X = (int)e.OffsetX;
-                        dt.Y = (int)e.OffsetY;
-                    }
-                    if (dt.State == 2)
-                    {
-                        ob[4] = "red";
-                        ob[2] = dt.Width-e.OffsetX+OldX;
-                        ob[3] = dt.Height-e.OffsetY+OldY;
-                        dt.Width =(int)( dt.Width - e.OffsetX + OldX);
-                        dt.Height =(int)( dt.Height-e.OffsetY+OldY);
-                    }
-                }
-
+                if (e == "Delete") delreg();
+                if (e == "NumpadAdd") addreg();
             }
-            OldX = (int)e.OffsetX;
-            OldY = (int)e.OffsetY;
-            PaintPrimitives();
-        }
-        else
-        {
-            if (r.Count() > 0)
+
+            async Task getareas()
             {
-                foreach (OCRData dt in r)
-                {
-                    dt.State = 0;
-                }
-            }
-            PaintPrimitives();
-
-        }
-    }
-
-
-    async Task OnMouseDown(MouseEventArgs e)
-    {
-        var r = from t in areas where t.State >0 select t;
-        if (r.Count() == 0)
-        {
-            if (regim)
-            {
-                bool Flag = false;
+                outareas.Clear();
                 foreach (OCRData dt in areas)
                 {
-                    if (dt.State == 2) dt.State = 0;
-                    if (e.OffsetY >= dt.Rect.Y && e.OffsetY <= dt.Rect.Y + dt.Rect.Height && e.OffsetX >= dt.Rect.X && e.OffsetX <= dt.Rect.X + dt.Rect.Width && !Flag)
-                    {
-                        dt.State = 1;
-                        Flag = true;
-                    }
-
+                    Rectangle rec = new Rectangle() { X = dt.X, Y = dt.Y, Width = dt.Width, Height = dt.Height };
+                    outareas.Add(rec);
                 }
+                txt.Clear();
+                str.Clear();
+                txt = await MyOcr1.Recognize(outareas);
+                foreach (string st in txt)
+                    str.Append(st);
+            }
+
+
+            public void delreg()
+            {
+                var r = from t in areas where t.State > 0 select t;
+                if (r.Count() > 0) areas.Remove(r.First());
                 PaintPrimitives();
             }
-            if (!regim)
+
+            public void addreg()
             {
+                Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = 100, Height = 100 };
+                areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
+                PaintPrimitives();
+            }
+
+            async Task OnMouseMove(MouseEventArgs e)
+            {
+                var r = from t in areas where t.State > 0 select t;
+                if (r.Count() == 1&&e.Buttons==1)
+                {
+                    foreach (OCRData dt in areas)
+                    {
+                        object[] ob = new object[5];
+                        ob[0] = dt.X;
+                        ob[1] = dt.Y;
+                        ob[2] = dt.Width;
+                        ob[3] = dt.Height;
+                        if (dt.State == 0) ob[4] = "green";
+                        else
+                        {
+                            if (e.OffsetY >= 0 && e.OffsetY < MaxY && e.OffsetX >= 0 && e.OffsetX < MaxX)
+                            {
+                                dt.State = 1;
+                                if (!RegimFlag)
+                                {
+                                    if (e.OffsetY >= dt.Y + dt.Height - 9 && e.OffsetY <= dt.Y + dt.Height && e.OffsetX >= dt.X + dt.Width - 9 && e.OffsetX <= dt.X + dt.Width)
+                                    {
+                                        regim = false;
+                                        RegimFlag = true;
+                                    }
+                                    else
+                                    {
+                                        regim = true;
+                                        RegimFlag = true;
+                                    }
+                                }
+                                if (regim)
+                                {
+                                    ob[4] = "red";
+                                    if((int)e.OffsetX>OldX) ob[0] =dt.X+5;
+                                    if ((int)e.OffsetX < OldX) ob[0] = dt.X - 5;
+                                    if ((int)e.OffsetY > OldY) ob[1] = dt.Y + 5;
+                                    if ((int)e.OffsetY < OldY) ob[1] = dt.Y - 5;
+                                    if ((int)ob[0] < 0) ob[0] = 0;
+                                    if ((int)ob[1] < 0) ob[1] = 0;
+                                    if ((int)ob[0]+dt.Width > MaxX) ob[0] = MaxX-dt.Width;
+                                    if ((int)ob[1] + dt.Height > MaxY) ob[1] = MaxY - dt.Height;
+                                    dt.X = (int)ob[0];
+                                    dt.Y = (int)ob[1];
+                                }
+                                if (!regim)
+                                {
+                                    ob[4] = "red";
+                                    ob[2] = (int)e.OffsetX - dt.X;
+                                    ob[3] = (int)e.OffsetY - dt.Y;
+                                    if ((int)ob[2] < 9) ob[2] = 9;
+                                    if ((int)ob[3] < 9) ob[3] = 9;
+                                    dt.Width = (int)(ob[2]);
+                                    dt.Height = (int)(ob[3]);
+                                }
+                            }
+                        }
+
+                    }
+                    OldX = (int)e.OffsetX;
+                    OldY = (int)e.OffsetY;
+                    PaintPrimitives();
+                }
+            }
+
+            [JSInvokable]
+            public async Task UpdateMessageCaller(string width,string height)
+            {
+                MaxX = int.Parse(width);
+                MaxY = int.Parse(height);
+            }
+
+            async Task OnMouseDown(MouseEventArgs e)
+            {
+                JS.InvokeAsync<string>("getsize", DotNetObjectReference.Create(this));
                 bool Flag = false;
                 foreach (OCRData dt in areas)
                 {
-                    if (dt.State == 1) dt.State = 0;
-                    if (e.OffsetY >= dt.Rect.Y && e.OffsetY <= dt.Rect.Y + dt.Rect.Height && e.OffsetX >= dt.Rect.X && e.OffsetX <= dt.Rect.X + dt.Rect.Width && !Flag)
+                    if (dt.State >0) dt.State = 0;
+                    else
+                    if (e.OffsetY >= dt.Y && e.OffsetY <= dt.Y + dt.Height && e.OffsetX >= dt.X && e.OffsetX <= dt.X + dt.Width && !Flag)
                     {
                         dt.State = 2;
                         Flag = true;
@@ -168,71 +189,71 @@
                 }
                 PaintPrimitives();
             }
-        }
-        else
-        {
-            if(r.Count()==1)
+            async Task OnMouseUp(MouseEventArgs e)
             {
-                Rectangle rec = new Rectangle() { X = r.First().X, Y = r.First().Y, Width = r.First().Width, Height = r.First().Height };
-                areas.Remove(r.First());
-                areas.Add(new OCRData() { Rect = rec, State = 0, X=rec.X, Y=rec.Y,Width=rec.Width, Height=rec.Height });
+                RegimFlag = false;
+                var r = from t in areas where t.State == 1 select t;
+                if (r.Count() == 1)
+                {
+                    Rectangle rec = new Rectangle() { X = r.First().X, Y = r.First().Y, Width = r.First().Width, Height = r.First().Height };
+                    areas.Remove(r.First());
+                    areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
+                }
+                foreach (OCRData dt in r)
+                {
+                    if(dt.State==1) dt.State = 0;
+                }
+                PaintPrimitives();
             }
-            foreach (OCRData dt in r)
+
+            async Task PaintPrimitives()
             {
-                dt.State = 0;
+                await JS.InvokeVoidAsync("myDrawImg", null);
+                foreach (OCRData r in areas)
+                {
+                    object[] ob = new object[5];
+                    ob[0] = r.X;
+                    ob[1] = r.Y;
+                    ob[2] = r.Width;
+                    ob[3] = r.Height;
+                    if (r.State == 0) ob[4] = "green";
+                    else ob[4] = "red";
+
+                    await JS.InvokeVoidAsync("myDrawRect", ob);
+
+                }
             }
-            PaintPrimitives();
-        }
 
-    }
-
-    async Task PaintPrimitives()
-    {
-        await JS.InvokeVoidAsync("myDrawImg", null);
-        foreach (OCRData r in areas)
-        {
-            object[] ob = new object[5];
-            ob[0] = r.X;
-            ob[1] = r.Y;
-            ob[2] = r.Width;
-            ob[3] = r.Height;
-            if (r.State == 0) ob[4] = "green";
-            else ob[4] = "red";
-
-            await JS.InvokeVoidAsync("myDrawRect", ob);
-
-        }
-    }
-    async Task LoadFiles(InputFileChangeEventArgs e)
-    {
-
-        try
-        {
-            FileStream reader = new FileStream(AppContext.BaseDirectory + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
-            var t = e.File.OpenReadStream(e.File.Size);
-            byte[] mb = new byte[e.File.Size];
-            await t.ReadAsync(mb, 0, (int)e.File.Size);
-            reader.Write(mb, 0, (int)e.File.Size);
-            reader.Close();
-            fname = "/ExpImp/" + e.File.Name;
-            spin = "display:block;";
-            canv = "display:none;";
-
-            StateHasChanged();
-            List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);
-            areas.Clear();
-            foreach (Rectangle r in rects)
+            async Task LoadFiles(InputFileChangeEventArgs e)
             {
-                areas.Add(new OCRData() { Rect=r, State=0,X=r.X,Y=r.Y, Height=r.Height,Width=r.Width });
-            }
-            PaintPrimitives();
-            spin = "display:none;";
-            canv = "display:block;";
-        }
-        catch (Exception ex)
-        {
-            throw (ex);
-        }
-    }
 
-}
+                try
+                {
+                    FileStream reader = new FileStream(AppContext.BaseDirectory + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
+                    var t = e.File.OpenReadStream(e.File.Size);
+                    byte[] mb = new byte[e.File.Size];
+                    await t.ReadAsync(mb, 0, (int)e.File.Size);
+                    reader.Write(mb, 0, (int)e.File.Size);
+                    reader.Close();
+                    fname = "/ExpImp/" + e.File.Name;
+                    spin = "display:block;";
+                    canv = "display:none;";
+
+                    StateHasChanged();
+                    List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);
+                    areas.Clear();
+                    foreach (Rectangle r in rects)
+                    {
+                        areas.Add(new OCRData() { Rect = r, State = 0, X = r.X, Y = r.Y, Height = r.Height, Width = r.Width });
+                    }
+                    PaintPrimitives();
+                    spin = "display:none;";
+                    canv = "display:block;";
+                }
+                catch (Exception ex)
+                {
+                    throw (ex);
+                }
+            }
+
+        }
