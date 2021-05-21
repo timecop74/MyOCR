@@ -32,18 +32,24 @@
 
     <script src="_framework/blazor.server.js"></script>
     <script type="text/javascript">
+        var dot = null;
+        var scX = 1;
+        var scY = 1;
+        var mainSc = 1;
+
         function myDrawImg() {
-            var dot = null;
-            ResizeCanvas();
+            //ResizeCanvas();
             var src = document.getElementById('source');
             var at = src.attributes.src;
             src.removeAttribute.src;
             src.attributes.src = at;
             var canvas = document.getElementById("canvas");
+            canvas.width = src.width * mainSc;
+            canvas.height = src.height * mainSc;
             var context = canvas.getContext("2d");
             context.clearRect(0, 0, canvas.width, canvas.height);
             var image = document.getElementById('source');
-            context.drawImage(image, 0, 0);
+            context.drawImage(image, 0, 0, src.width, src.height, 0, 0, src.width * mainSc, src.height * mainSc);
         };
         function ResizeCanvas() {
             var src = document.getElementById('source');
@@ -53,13 +59,35 @@
             canvas.width = wt;
             canvas.height = ht;
         };
+        function FitToScreen(dotNetInstance) {
+            if (mainSc != 1) {
+                mainSc = 1
+                myDrawImg();
+                var src = document.getElementById('source');
+                if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width, "" + src.height);
+            }
+            else {
+                var src = document.getElementById('source');
+                var wt = src.width;
+                var factor = src.height / src.width;
+                scX = 700 / src.width;
+                var ht = src.height;
+                scY = (900 / src.height);
+                if (scX > scY) mainSc = scY;
+                else mainSc = scX;
+                dot = dotNetInstance;
+                if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width,"" + src.height);
+                myDrawImg();
+            }
+        };
+
         function myDrawRect(x, y, width, height,color) {
             var canvas = document.getElementById("canvas");
             var context = canvas.getContext("2d");
             context.strokeStyle = color;
-            context.strokeRect(x, y, width, height);
-            context.strokeRect(x + width - 2, y + height-2, 2, 2);
-            context.strokeRect(x + width - 3, y + height - 3, 3, 3);
+            context.strokeRect(x * mainSc, y * mainSc, width * mainSc, height * mainSc);
+            context.strokeRect((x + width - 2) * mainSc, (y + height - 2) * mainSc, 2, 2);
+            context.strokeRect((x + width - 3) * mainSc, (y + height - 3) * mainSc, 3, 3);
         };
         function getsize(dotNetInstance) {
             var src = document.getElementById('source');
@@ -67,7 +95,7 @@
             dotNetInstance.invokeMethodAsync('UpdateMessageCaller', ""+src.width, ""+src.height);
         };
         document.addEventListener('keydown', function (event) {
-            if (dot != null) dot.invokeMethodAsync('OnKeyPress', event.code);
+            if (dot != null && (event.code == "Delete" || event.code =="NumpadAdd")) dot.invokeMethodAsync('OnKeyPress', event.code);
             }
         );
     </script>

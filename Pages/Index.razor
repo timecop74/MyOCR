@@ -1,8 +1,10 @@
 ﻿@page "/"
-@using System.Drawing
-@using MyOCR.Data
+@using System.Drawing;
+@using MyOCR.Data;
 @using System.IO;
-@using System.Text
+@using System.Text;
+@using System.Globalization;
+
 @inject IJSRuntime JS
 
 @inject OCRService MyOcr1
@@ -26,6 +28,7 @@
             <input type="button" @onclick="addreg" value="Add region" />
             <input type="button" @onclick="delreg" value="Delete region">
             <input type="button" @onclick="getareas" value="Recognize">
+            <input type="button" @onclick="fitscreen" value="Fit/Unfit to screen">
         </div>
     </div>
     <div class="row justify-content-center">
@@ -33,7 +36,7 @@
             <div class="spinner-border" style="@spin" role="status">
                 <span class="sr-only">Loading...</span>
             </div>
-            <canvas id="canvas" width="180" height="170" style="@canv" @onmousedown="OnMouseDown"  @onmouseup="OnMouseUp" @onmousemove="OnMouseMove">
+            <canvas id="canvas" style="@canv" @onmousedown="OnMouseDown" @onmouseup="OnMouseUp" @onmousemove="OnMouseMove">
                 <img src="@fname" id="source" />
             </canvas>
         </div>
@@ -44,216 +47,236 @@
         </div>
     </div>
 </div>
-        @code{
-            private string fname = "";
-            int maxY = 700;
-            int maxX = 700;
-            int OldX = 0;
-            int OldY = 0;
-            List<OCRData> areas = new List<OCRData>();
-            List<Rectangle> outareas = new List<Rectangle>();
-            List<string> txt = new List<string>();
-            bool regim = false;
-            string spin = "display:none;";
-            string canv = "display:none;";
-            StringBuilder str = new StringBuilder();
-            private bool RegimFlag = false;
-            private int MaxX = 0;
-            private int MaxY = 0;
+@code{
+    private string fname = "";
+    int maxY = 700;
+    int maxX = 700;
+    int OldX = 0;
+    int OldY = 0;
+    List<OCRData> areas = new List<OCRData>();
+    List<Rectangle> outareas = new List<Rectangle>();
+    List<string> txt = new List<string>();
+    bool regim = false;
+    string spin = "display:none;";
+    string canv = "display:none;";
+    StringBuilder str = new StringBuilder();
+    private bool RegimFlag = false;
+    private int MaxX = 0;
+    private int MaxY = 0;
+    private double MaxSc = 1;
 
-            [JSInvokable]
-            public void OnKeyPress(string e)
-            {
-                if (e == "Delete") delreg();
-                if (e == "NumpadAdd") addreg();
-            }
+    [JSInvokable]
+    public void OnKeyPress(string e)
+    {
+        if (e == "Delete") delreg();
+        if (e == "NumpadAdd") addreg();
+    }
 
-            async Task getareas()
+
+    [JSInvokable]
+    public void OnFitToSc(string e,string width,string height)
+    {
+        MaxSc = double.Parse(e, CultureInfo.InvariantCulture);
+        MaxX = (int)(double.Parse(width, CultureInfo.InvariantCulture));
+        MaxY = (int)(double.Parse(height, CultureInfo.InvariantCulture));
+        PaintPrimitives();
+    }
+
+    async Task fitscreen()
+    {
+        await JS.InvokeVoidAsync("FitToScreen", DotNetObjectReference.Create(this));
+    }
+
+
+    async Task getareas()
+    {
+        outareas.Clear();
+        foreach (OCRData dt in areas)
+        {
+            Rectangle rec = new Rectangle() { X = dt.X, Y = dt.Y, Width = dt.Width, Height = dt.Height };
+            outareas.Add(rec);
+        }
+        txt.Clear();
+        str.Clear();
+        if(outareas.Count()>0) txt = await MyOcr1.Recognize(outareas);
+        else await JS.InvokeVoidAsync("alert", "Recognition areas not found!");
+        foreach (string st in txt)
+            str.Append(st);
+    }
+
+
+    public void delreg()
+    {
+        var r = from t in areas where t.State > 0 select t;
+        if (r.Count() > 0) areas.Remove(r.First());
+        PaintPrimitives();
+    }
+
+    public void addreg()
+    {
+        Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = 100, Height = 100 };
+        areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
+        PaintPrimitives();
+    }
+
+    async Task OnMouseMove(MouseEventArgs e)
+    {
+        var r = from t in areas where t.State > 0 select t;
+        if (r.Count() == 1 && e.Buttons == 1)
+        {
+            foreach (OCRData dt in areas)
             {
-                outareas.Clear();
-                foreach (OCRData dt in areas)
+                object[] ob = new object[5];
+                ob[0] = dt.X;
+                ob[1] = dt.Y;
+                ob[2] = dt.Width;
+                ob[3] = dt.Height;
+                if (dt.State == 0) ob[4] = "green";
+                else
                 {
-                    Rectangle rec = new Rectangle() { X = dt.X, Y = dt.Y, Width = dt.Width, Height = dt.Height };
-                    outareas.Add(rec);
-                }
-                txt.Clear();
-                str.Clear();
-                txt = await MyOcr1.Recognize(outareas);
-                foreach (string st in txt)
-                    str.Append(st);
-            }
-
-
-            public void delreg()
-            {
-                var r = from t in areas where t.State > 0 select t;
-                if (r.Count() > 0) areas.Remove(r.First());
-                PaintPrimitives();
-            }
-
-            public void addreg()
-            {
-                Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = 100, Height = 100 };
-                areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
-                PaintPrimitives();
-            }
-
-            async Task OnMouseMove(MouseEventArgs e)
-            {
-                var r = from t in areas where t.State > 0 select t;
-                if (r.Count() == 1&&e.Buttons==1)
-                {
-                    foreach (OCRData dt in areas)
+                    if (e.OffsetY >= 0 && e.OffsetY < MaxY && e.OffsetX >= 0 && e.OffsetX < MaxX)
                     {
-                        object[] ob = new object[5];
-                        ob[0] = dt.X;
-                        ob[1] = dt.Y;
-                        ob[2] = dt.Width;
-                        ob[3] = dt.Height;
-                        if (dt.State == 0) ob[4] = "green";
-                        else
+                        dt.State = 1;
+                        if (!RegimFlag)
                         {
-                            if (e.OffsetY >= 0 && e.OffsetY < MaxY && e.OffsetX >= 0 && e.OffsetX < MaxX)
+                            if (e.OffsetY / MaxSc >= dt.Y + dt.Height - 9 && e.OffsetY / MaxSc <= dt.Y + dt.Height && e.OffsetX / MaxSc >= dt.X + dt.Width - 9 && e.OffsetX / MaxSc <= dt.X + dt.Width)
                             {
-                                dt.State = 1;
-                                if (!RegimFlag)
-                                {
-                                    if (e.OffsetY >= dt.Y + dt.Height - 9 && e.OffsetY <= dt.Y + dt.Height && e.OffsetX >= dt.X + dt.Width - 9 && e.OffsetX <= dt.X + dt.Width)
-                                    {
-                                        regim = false;
-                                        RegimFlag = true;
-                                    }
-                                    else
-                                    {
-                                        regim = true;
-                                        RegimFlag = true;
-                                    }
-                                }
-                                if (regim)
-                                {
-                                    ob[4] = "red";
-                                    if((int)e.OffsetX>OldX) ob[0] =dt.X+5;
-                                    if ((int)e.OffsetX < OldX) ob[0] = dt.X - 5;
-                                    if ((int)e.OffsetY > OldY) ob[1] = dt.Y + 5;
-                                    if ((int)e.OffsetY < OldY) ob[1] = dt.Y - 5;
-                                    if ((int)ob[0] < 0) ob[0] = 0;
-                                    if ((int)ob[1] < 0) ob[1] = 0;
-                                    if ((int)ob[0]+dt.Width > MaxX) ob[0] = MaxX-dt.Width;
-                                    if ((int)ob[1] + dt.Height > MaxY) ob[1] = MaxY - dt.Height;
-                                    dt.X = (int)ob[0];
-                                    dt.Y = (int)ob[1];
-                                }
-                                if (!regim)
-                                {
-                                    ob[4] = "red";
-                                    ob[2] = (int)e.OffsetX - dt.X;
-                                    ob[3] = (int)e.OffsetY - dt.Y;
-                                    if ((int)ob[2] < 9) ob[2] = 9;
-                                    if ((int)ob[3] < 9) ob[3] = 9;
-                                    dt.Width = (int)(ob[2]);
-                                    dt.Height = (int)(ob[3]);
-                                }
+                                regim = false;
+                                RegimFlag = true;
+                            }
+                            else
+                            {
+                                regim = true;
+                                RegimFlag = true;
                             }
                         }
-
+                        if (regim)
+                        {
+                            ob[4] = "red";
+                            if ((int)e.OffsetX > OldX) ob[0] = (int)(dt.X + 3/MaxSc);
+                            if ((int)e.OffsetX < OldX) ob[0] = (int)(dt.X - 3 / MaxSc);
+                            if ((int)e.OffsetY > OldY) ob[1] = (int)(dt.Y + 3 / MaxSc);
+                            if ((int)e.OffsetY < OldY) ob[1] = (int)(dt.Y - 3 / MaxSc);
+                            if ((int)ob[0] < 0) ob[0] = 0;
+                            if ((int)ob[1] < 0) ob[1] = 0;
+                            if ((int)ob[0] + dt.Width > MaxX ) ob[0] = (int)(MaxX - dt.Width);
+                            if ((int)ob[1] + dt.Height > MaxY ) ob[1] = (int)(MaxY  - dt.Height);
+                            dt.X = (int)ob[0];
+                            dt.Y = (int)ob[1];
+                        }
+                        if (!regim)
+                        {
+                            ob[4] = "red";
+                            ob[2] =(int)( e.OffsetX / MaxSc - dt.X);
+                            ob[3] =(int)( e.OffsetY / MaxSc - dt.Y);
+                            if ((int)ob[2] < 9) ob[2] = 9;
+                            if ((int)ob[3] < 9) ob[3] = 9;
+                            if ((int)ob[0] + (int)ob[2] > MaxX ) ob[2] = (int)(MaxX- (int)ob[0]);
+                            if ((int)ob[1] + (int)ob[3] > MaxY) ob[3] = (int)(MaxY - (int)ob[1]);
+                            dt.Width = (int)(ob[2]);
+                            dt.Height = (int)(ob[3]);
+                        }
                     }
-                    OldX = (int)e.OffsetX;
-                    OldY = (int)e.OffsetY;
-                    PaintPrimitives();
                 }
+
             }
+            OldX = (int)e.OffsetX;
+            OldY = (int)e.OffsetY;
+            PaintPrimitives();
+        }
+    }
 
-            [JSInvokable]
-            public async Task UpdateMessageCaller(string width,string height)
+    [JSInvokable]
+    public async Task UpdateMessageCaller(string width, string height)
+    {
+        MaxX = int.Parse(width);
+        MaxY = int.Parse(height);
+    }
+
+    async Task OnMouseDown(MouseEventArgs e)
+    {
+        JS.InvokeAsync<string>("getsize", DotNetObjectReference.Create(this));
+        bool Flag = false;
+        foreach (OCRData dt in areas)
+        {
+            if (dt.State > 0) dt.State = 0;
+            else
+            if (e.OffsetY / MaxSc >= dt.Y && e.OffsetY / MaxSc <= dt.Y + dt.Height && e.OffsetX / MaxSc >= dt.X && e.OffsetX / MaxSc <= dt.X + dt.Width && !Flag)
             {
-                MaxX = int.Parse(width);
-                MaxY = int.Parse(height);
-            }
-
-            async Task OnMouseDown(MouseEventArgs e)
-            {
-                JS.InvokeAsync<string>("getsize", DotNetObjectReference.Create(this));
-                bool Flag = false;
-                foreach (OCRData dt in areas)
-                {
-                    if (dt.State >0) dt.State = 0;
-                    else
-                    if (e.OffsetY >= dt.Y && e.OffsetY <= dt.Y + dt.Height && e.OffsetX >= dt.X && e.OffsetX <= dt.X + dt.Width && !Flag)
-                    {
-                        dt.State = 2;
-                        Flag = true;
-                        OldX = (int)e.OffsetX;
-                        OldY = (int)e.OffsetY;
-                    }
-
-                }
-                PaintPrimitives();
-            }
-            async Task OnMouseUp(MouseEventArgs e)
-            {
-                RegimFlag = false;
-                var r = from t in areas where t.State == 1 select t;
-                if (r.Count() == 1)
-                {
-                    Rectangle rec = new Rectangle() { X = r.First().X, Y = r.First().Y, Width = r.First().Width, Height = r.First().Height };
-                    areas.Remove(r.First());
-                    areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
-                }
-                foreach (OCRData dt in r)
-                {
-                    if(dt.State==1) dt.State = 0;
-                }
-                PaintPrimitives();
-            }
-
-            async Task PaintPrimitives()
-            {
-                await JS.InvokeVoidAsync("myDrawImg", null);
-                foreach (OCRData r in areas)
-                {
-                    object[] ob = new object[5];
-                    ob[0] = r.X;
-                    ob[1] = r.Y;
-                    ob[2] = r.Width;
-                    ob[3] = r.Height;
-                    if (r.State == 0) ob[4] = "green";
-                    else ob[4] = "red";
-
-                    await JS.InvokeVoidAsync("myDrawRect", ob);
-
-                }
-            }
-
-            async Task LoadFiles(InputFileChangeEventArgs e)
-            {
-
-                try
-                {
-                    FileStream reader = new FileStream(AppContext.BaseDirectory + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
-                    var t = e.File.OpenReadStream(e.File.Size);
-                    byte[] mb = new byte[e.File.Size];
-                    await t.ReadAsync(mb, 0, (int)e.File.Size);
-                    reader.Write(mb, 0, (int)e.File.Size);
-                    reader.Close();
-                    fname = "/ExpImp/" + e.File.Name;
-                    spin = "display:block;";
-                    canv = "display:none;";
-
-                    StateHasChanged();
-                    List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);
-                    areas.Clear();
-                    foreach (Rectangle r in rects)
-                    {
-                        areas.Add(new OCRData() { Rect = r, State = 0, X = r.X, Y = r.Y, Height = r.Height, Width = r.Width });
-                    }
-                    PaintPrimitives();
-                    spin = "display:none;";
-                    canv = "display:block;";
-                }
-                catch (Exception ex)
-                {
-                    throw (ex);
-                }
+                dt.State = 2;
+                Flag = true;
+                OldX = (int)e.OffsetX;
+                OldY = (int)e.OffsetY;
             }
 
         }
+        PaintPrimitives();
+    }
+    async Task OnMouseUp(MouseEventArgs e)
+    {
+        RegimFlag = false;
+        var r = from t in areas where t.State == 1 select t;
+        if (r.Count() == 1)
+        {
+            Rectangle rec = new Rectangle() { X = r.First().X, Y = r.First().Y, Width = r.First().Width, Height = r.First().Height };
+            areas.Remove(r.First());
+            areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
+        }
+        foreach (OCRData dt in r)
+        {
+            if (dt.State == 1) dt.State = 0;
+        }
+        PaintPrimitives();
+    }
+
+    async Task PaintPrimitives()
+    {
+        await JS.InvokeVoidAsync("myDrawImg", null);
+        foreach (OCRData r in areas)
+        {
+            object[] ob = new object[5];
+            ob[0] = r.X;
+            ob[1] = r.Y;
+            ob[2] = r.Width;
+            ob[3] = r.Height;
+            if (r.State == 0) ob[4] = "green";
+            else ob[4] = "red";
+
+            await JS.InvokeVoidAsync("myDrawRect", ob);
+
+        }
+    }
+
+    async Task LoadFiles(InputFileChangeEventArgs e)
+    {
+
+        try
+        {
+            FileStream reader = new FileStream(AppContext.BaseDirectory + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
+            var t = e.File.OpenReadStream(e.File.Size);
+            byte[] mb = new byte[e.File.Size];
+            await t.ReadAsync(mb, 0, (int)e.File.Size);
+            reader.Write(mb, 0, (int)e.File.Size);
+            reader.Close();
+            fname = "/ExpImp/" + e.File.Name;
+            spin = "display:block;";
+            canv = "display:none;";
+
+            StateHasChanged();
+            List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);
+            areas.Clear();
+            foreach (Rectangle r in rects)
+            {
+                areas.Add(new OCRData() { Rect = r, State = 0, X = r.X, Y = r.Y, Height = r.Height, Width = r.Width });
+            }
+            PaintPrimitives();
+            spin = "display:none;";
+            canv = "display:block;";
+        }
+        catch (Exception ex)
+        {
+            throw (ex);
+        }
+    }
+
+}
