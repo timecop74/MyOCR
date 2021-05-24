@@ -37,7 +37,7 @@
         var scY = 1;
         var mainSc = 1;
 
-        function myDrawImg() {
+        function myDrawImg() {//Paints uploaded image 
             //ResizeCanvas();
             var src = document.getElementById('source');
             var at = src.attributes.src;
@@ -48,25 +48,29 @@
             canvas.height = src.height * mainSc;
             var context = canvas.getContext("2d");
             context.clearRect(0, 0, canvas.width, canvas.height);
-            var image = document.getElementById('source');
-            context.drawImage(image, 0, 0, src.width, src.height, 0, 0, src.width * mainSc, src.height * mainSc);
+            context.drawImage(src, 0, 0, src.width, src.height, 0, 0, src.width * mainSc, src.height * mainSc);
         };
-        function ResizeCanvas() {
+        function ResizeCanvas(dotNet) {//Inits canvas after uploading image
+            scX = 1;
+            scY = 1;
+            mainSc = 1;
             var src = document.getElementById('source');
             var wt = src.width;
             var ht = src.height;
             var canvas = document.getElementById("canvas");
             canvas.width = wt;
             canvas.height = ht;
+            dot = dotNet;
+            if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width, "" + src.height);
         };
-        function FitToScreen(dotNetInstance) {
-            if (mainSc != 1) {
+        function FitToScreen(dotNetInstance) {//Scale image
+            if (mainSc != 1) {//Get original size
                 mainSc = 1
                 myDrawImg();
                 var src = document.getElementById('source');
                 if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width, "" + src.height);
             }
-            else {
+            else {//Fit to 700X900 image
                 var src = document.getElementById('source');
                 var wt = src.width;
                 var factor = src.height / src.width;
@@ -76,12 +80,12 @@
                 if (scX > scY) mainSc = scY;
                 else mainSc = scX;
                 dot = dotNetInstance;
-                if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width,"" + src.height);
+                if (dot != null) dot.invokeMethodAsync('OnFitToSc', "" + mainSc, "" + src.width, "" + src.height);
                 myDrawImg();
             }
         };
 
-        function myDrawRect(x, y, width, height,color) {
+        function myDrawRect(x, y, width, height,color) {//Draw rectangle
             var canvas = document.getElementById("canvas");
             var context = canvas.getContext("2d");
             context.strokeStyle = color;
@@ -89,12 +93,12 @@
             context.strokeRect((x + width - 2) * mainSc, (y + height - 2) * mainSc, 2, 2);
             context.strokeRect((x + width - 3) * mainSc, (y + height - 3) * mainSc, 3, 3);
         };
-        function getsize(dotNetInstance) {
+        function getsize(dotNetInstance) {//Return size of image
             var src = document.getElementById('source');
             dot = dotNetInstance;
             dotNetInstance.invokeMethodAsync('UpdateMessageCaller', ""+src.width, ""+src.height);
         };
-        document.addEventListener('keydown', function (event) {
+        document.addEventListener('keydown', function (event) {//Set key acception
             if (dot != null && (event.code == "Delete" || event.code =="NumpadAdd")) dot.invokeMethodAsync('OnKeyPress', event.code);
             }
         );

@@ -4,6 +4,7 @@
 @using System.IO;
 @using System.Text;
 @using System.Globalization;
+@using System.Reflection;
 
 @inject IJSRuntime JS
 
@@ -48,25 +49,23 @@
     </div>
 </div>
 @code{
-    private string fname = "";
-    int maxY = 700;
-    int maxX = 700;
-    int OldX = 0;
-    int OldY = 0;
-    List<OCRData> areas = new List<OCRData>();
-    List<Rectangle> outareas = new List<Rectangle>();
-    List<string> txt = new List<string>();
-    bool regim = false;
-    string spin = "display:none;";
-    string canv = "display:none;";
-    StringBuilder str = new StringBuilder();
-    private bool RegimFlag = false;
-    private int MaxX = 0;
-    private int MaxY = 0;
-    private double MaxSc = 1;
+    private string fname = "";//Name uploaded file
+    int OldX = 0;//Last X coordinate
+    int OldY = 0;//Last Y coordinate
+    List<OCRData> areas = new List<OCRData>(); //List of recognized areas
+    List<Rectangle> outareas = new List<Rectangle>(); //Output list of areas
+    List<string> txt = new List<string>();//List of recognized strings
+    bool regim = false;//Switch regim from moving to resize
+    string spin = "display:none;";//Show hide spinner
+    string canv = "display:none;";//Show hide canvas
+    StringBuilder str = new StringBuilder();//Recognized text
+    private bool RegimFlag = false;//Switch to regim on/off 
+    private int MaxX = 0;//Max X coordinate
+    private int MaxY = 0;//Max Y coordinate
+    private double MaxSc = 1;//Scale
 
     [JSInvokable]
-    public void OnKeyPress(string e)
+    public void OnKeyPress(string e)//Process key pressing - if Delete - remover selected area. If + add area
     {
         if (e == "Delete") delreg();
         if (e == "NumpadAdd") addreg();
@@ -74,21 +73,29 @@
 
 
     [JSInvokable]
-    public void OnFitToSc(string e,string width,string height)
+    public void OnFitToSc(string e, string width, string height)//Return from JS after rescaling image scale,max X coordinate and max Y coordinate 
     {
         MaxSc = double.Parse(e, CultureInfo.InvariantCulture);
-        MaxX = (int)(double.Parse(width, CultureInfo.InvariantCulture));
-        MaxY = (int)(double.Parse(height, CultureInfo.InvariantCulture));
+        if (MaxSc > 1)
+        {
+            MaxX = (int)(double.Parse(width, CultureInfo.InvariantCulture)*MaxSc);
+            MaxY = (int)(double.Parse(height, CultureInfo.InvariantCulture)*MaxSc);
+        }
+        else
+        {
+            MaxX = (int)(double.Parse(width, CultureInfo.InvariantCulture));
+            MaxY = (int)(double.Parse(height, CultureInfo.InvariantCulture));
+        }
         PaintPrimitives();
     }
 
-    async Task fitscreen()
+    async Task fitscreen()//Rescale selected image
     {
         await JS.InvokeVoidAsync("FitToScreen", DotNetObjectReference.Create(this));
     }
 
 
-    async Task getareas()
+    async Task getareas()//Get resulting areas and recognize text
     {
         outareas.Clear();
         foreach (OCRData dt in areas)
@@ -98,80 +105,85 @@
         }
         txt.Clear();
         str.Clear();
-        if(outareas.Count()>0) txt = await MyOcr1.Recognize(outareas);
+        if (outareas.Count() > 0) txt = await MyOcr1.Recognize(outareas);
         else await JS.InvokeVoidAsync("alert", "Recognition areas not found!");
         foreach (string st in txt)
             str.Append(st);
     }
 
 
-    public void delreg()
+    public void delreg()//Delete selected area
     {
         var r = from t in areas where t.State > 0 select t;
         if (r.Count() > 0) areas.Remove(r.First());
         PaintPrimitives();
     }
 
-    public void addreg()
+    public void addreg()//Add recognition area
     {
-        Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = 100, Height = 100 };
+        int wt = 100;
+        int hg = 100;
+        if (MaxX / MaxSc < wt) wt =(int)(MaxX / MaxSc);//Check what rectangle in draw area
+        if (MaxY / MaxSc < hg) hg = (int)(MaxY / MaxSc);
+        Rectangle rec = new Rectangle() { X = 0, Y = 0, Width = wt, Height = hg };
         areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
         PaintPrimitives();
     }
 
-    async Task OnMouseMove(MouseEventArgs e)
+    async Task OnMouseMove(MouseEventArgs e)//Occours when mouse move
     {
-        var r = from t in areas where t.State > 0 select t;
-        if (r.Count() == 1 && e.Buttons == 1)
+        var r = from t in areas where t.State > 0 select t; //Get selected areas
+        if (r.Count() == 1 && e.Buttons == 1)//If selected 1 area and pressed left mouse button
         {
-            foreach (OCRData dt in areas)
+            foreach (OCRData dt in areas)//For all areas
             {
-                object[] ob = new object[5];
+                object[] ob = new object[5];//Get area coordinates
                 ob[0] = dt.X;
                 ob[1] = dt.Y;
                 ob[2] = dt.Width;
                 ob[3] = dt.Height;
-                if (dt.State == 0) ob[4] = "green";
+                if (dt.State == 0) ob[4] = "green";//if area not selected it paint with green color
                 else
                 {
-                    if (e.OffsetY >= 0 && e.OffsetY < MaxY && e.OffsetX >= 0 && e.OffsetX < MaxX)
+                    if (e.OffsetY >= 0 && e.OffsetY < MaxY && e.OffsetX >= 0 && e.OffsetX < MaxX)//if mouse in canvas
                     {
-                        dt.State = 1;
-                        if (!RegimFlag)
+                        dt.State = 1;//area selected and processed
+                        if (!RegimFlag)//if regim not on - on regim
                         {
                             if (e.OffsetY / MaxSc >= dt.Y + dt.Height - 9 && e.OffsetY / MaxSc <= dt.Y + dt.Height && e.OffsetX / MaxSc >= dt.X + dt.Width - 9 && e.OffsetX / MaxSc <= dt.X + dt.Width)
+                            //if mouse on right down corner
                             {
-                                regim = false;
+                                regim = false;//on resizing regim
                                 RegimFlag = true;
                             }
                             else
                             {
-                                regim = true;
+                                regim = true;//on moving regim
                                 RegimFlag = true;
                             }
                         }
-                        if (regim)
+                        if (regim)//moving
                         {
-                            ob[4] = "red";
-                            if ((int)e.OffsetX > OldX) ob[0] = (int)(dt.X + 3/MaxSc);
-                            if ((int)e.OffsetX < OldX) ob[0] = (int)(dt.X - 3 / MaxSc);
-                            if ((int)e.OffsetY > OldY) ob[1] = (int)(dt.Y + 3 / MaxSc);
-                            if ((int)e.OffsetY < OldY) ob[1] = (int)(dt.Y - 3 / MaxSc);
+                            ob[4] = "red";//draw selected area in red color
+                            if ((int)e.OffsetX > OldX) ob[0] = (int)(dt.X + 3 / MaxSc);//if current  mouse X >Old X then add X of left top corner 3/Scale
+                            if ((int)e.OffsetX < OldX) ob[0] = (int)(dt.X - 3 / MaxSc);//if current  mouse X <Old X then subtract X of left top corner 3/Scale
+                            if ((int)e.OffsetY > OldY) ob[1] = (int)(dt.Y + 3 / MaxSc);//if current  mouse Y >Old Y then add Y of left top corner 3/Scale
+                            if ((int)e.OffsetY < OldY) ob[1] = (int)(dt.Y - 3 / MaxSc);//if current  mouse Y <Old Y then subtract Y of left top corner 3/Scale
                             if ((int)ob[0] < 0) ob[0] = 0;
                             if ((int)ob[1] < 0) ob[1] = 0;
-                            if ((int)ob[0] + dt.Width > MaxX ) ob[0] = (int)(MaxX - dt.Width);
-                            if ((int)ob[1] + dt.Height > MaxY ) ob[1] = (int)(MaxY  - dt.Height);
+                            if ((int)ob[0] + dt.Width > MaxX) ob[0] = (int)(MaxX - dt.Width);//Check what X and Y in canvas area
+                            if ((int)ob[1] + dt.Height > MaxY) ob[1] = (int)(MaxY - dt.Height);
                             dt.X = (int)ob[0];
                             dt.Y = (int)ob[1];
                         }
-                        if (!regim)
+                        if (!regim)//resizing
                         {
                             ob[4] = "red";
-                            ob[2] =(int)( e.OffsetX / MaxSc - dt.X);
-                            ob[3] =(int)( e.OffsetY / MaxSc - dt.Y);
-                            if ((int)ob[2] < 9) ob[2] = 9;
+                            ob[2] = (int)(e.OffsetX / MaxSc - dt.X);//Set right down corner coordinates
+                            ob[3] = (int)(e.OffsetY / MaxSc - dt.Y);
+                            if ((int)ob[2] < 9) ob[2] = 9;//Check what width and height of area not < 9
                             if ((int)ob[3] < 9) ob[3] = 9;
-                            if ((int)ob[0] + (int)ob[2] > MaxX ) ob[2] = (int)(MaxX- (int)ob[0]);
+                            if ((int)ob[0] + (int)ob[2] > MaxX) ob[2] = (int)(MaxX - (int)ob[0]);//Check what X and Y in canvas area
                             if ((int)ob[1] + (int)ob[3] > MaxY) ob[3] = (int)(MaxY - (int)ob[1]);
                             dt.Width = (int)(ob[2]);
                             dt.Height = (int)(ob[3]);
@@ -180,61 +192,71 @@
                 }
 
             }
-            OldX = (int)e.OffsetX;
+            OldX = (int)e.OffsetX;//Get old mouse pozition
             OldY = (int)e.OffsetY;
             PaintPrimitives();
         }
     }
 
     [JSInvokable]
-    public async Task UpdateMessageCaller(string width, string height)
+    public async Task UpdateMessageCaller(string width, string height)//Get image max width and height
     {
-        MaxX = int.Parse(width);
-        MaxY = int.Parse(height);
+        if (MaxSc > 1)
+        {
+            MaxX = (int)(int.Parse(width)*MaxSc);
+            MaxY = (int)(int.Parse(height)*MaxSc);
+
+        }
+        else
+        {
+            MaxX = int.Parse(width);
+            MaxY = int.Parse(height);
+        }
     }
 
-    async Task OnMouseDown(MouseEventArgs e)
+    async Task OnMouseDown(MouseEventArgs e)//Occours if mouse key pressed
     {
-        JS.InvokeAsync<string>("getsize", DotNetObjectReference.Create(this));
+        JS.InvokeAsync<string>("getsize", DotNetObjectReference.Create(this));//recalc image width and height
         bool Flag = false;
-        foreach (OCRData dt in areas)
+        foreach (OCRData dt in areas)//for all areas
         {
-            if (dt.State > 0) dt.State = 0;
+            if (dt.State > 0) dt.State = 0;//if selected set to unselected
             else
             if (e.OffsetY / MaxSc >= dt.Y && e.OffsetY / MaxSc <= dt.Y + dt.Height && e.OffsetX / MaxSc >= dt.X && e.OffsetX / MaxSc <= dt.X + dt.Width && !Flag)
+            //if mouse pointer in current area
             {
-                dt.State = 2;
+                dt.State = 2;//set state to selected and not processed
                 Flag = true;
-                OldX = (int)e.OffsetX;
+                OldX = (int)e.OffsetX;//store mouse pointer position
                 OldY = (int)e.OffsetY;
             }
 
         }
         PaintPrimitives();
     }
-    async Task OnMouseUp(MouseEventArgs e)
+    async Task OnMouseUp(MouseEventArgs e)//occours when mouse key up
     {
         RegimFlag = false;
-        var r = from t in areas where t.State == 1 select t;
-        if (r.Count() == 1)
+        var r = from t in areas where t.State == 1 select t;//get all selected areas
+        if (r.Count() == 1)//if selected one area store area atributes
         {
             Rectangle rec = new Rectangle() { X = r.First().X, Y = r.First().Y, Width = r.First().Width, Height = r.First().Height };
             areas.Remove(r.First());
             areas.Add(new OCRData() { Rect = rec, State = 0, X = rec.X, Y = rec.Y, Width = rec.Width, Height = rec.Height });
         }
-        foreach (OCRData dt in r)
+        foreach (OCRData dt in r)//unselect all areas if it processed
         {
             if (dt.State == 1) dt.State = 0;
         }
         PaintPrimitives();
     }
 
-    async Task PaintPrimitives()
+    async Task PaintPrimitives()//draw all areas
     {
-        await JS.InvokeVoidAsync("myDrawImg", null);
-        foreach (OCRData r in areas)
+        await JS.InvokeVoidAsync("myDrawImg", null);//drawing processed image
+        foreach (OCRData r in areas)//for all areas
         {
-            object[] ob = new object[5];
+            object[] ob = new object[5];//get area coordinates
             ob[0] = r.X;
             ob[1] = r.Y;
             ob[2] = r.Width;
@@ -242,36 +264,40 @@
             if (r.State == 0) ob[4] = "green";
             else ob[4] = "red";
 
-            await JS.InvokeVoidAsync("myDrawRect", ob);
+            await JS.InvokeVoidAsync("myDrawRect", ob);//call JS and draw area
 
         }
     }
 
-    async Task LoadFiles(InputFileChangeEventArgs e)
+    async Task LoadFiles(InputFileChangeEventArgs e)//loading selected file to folder ExpImp
     {
 
         try
         {
-            FileStream reader = new FileStream(AppContext.BaseDirectory + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
+            MaxSc = 1;
+            //get file - read it and write to folder ExpImp 
+            FileStream reader = new FileStream( AppContext.BaseDirectory.Substring(0, AppContext.BaseDirectory.IndexOf("bin")) + "/wwwroot/ExpImp/" + e.File.Name, FileMode.Create);
             var t = e.File.OpenReadStream(e.File.Size);
             byte[] mb = new byte[e.File.Size];
             await t.ReadAsync(mb, 0, (int)e.File.Size);
             reader.Write(mb, 0, (int)e.File.Size);
             reader.Close();
             fname = "/ExpImp/" + e.File.Name;
-            spin = "display:block;";
-            canv = "display:none;";
-
+            spin = "display:block;";//Show spinner
+            canv = "display:none;";//Hide canvas
             StateHasChanged();
-            List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);
+
+            List<Rectangle> rects = await MyOcr1.GetRectAsync(e.File);//Get recognition areas
             areas.Clear();
             foreach (Rectangle r in rects)
             {
                 areas.Add(new OCRData() { Rect = r, State = 0, X = r.X, Y = r.Y, Height = r.Height, Width = r.Width });
             }
+            spin = "display:none;";//Hide spinner
+            canv = "display:block;";//Show canvas
+            StateHasChanged();
+            await JS.InvokeVoidAsync("ResizeCanvas", DotNetObjectReference.Create(this));
             PaintPrimitives();
-            spin = "display:none;";
-            canv = "display:block;";
         }
         catch (Exception ex)
         {
